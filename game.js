@@ -614,10 +614,12 @@ let frameCount = 0;
 let confettiTriggered = false;
 let selectedCharacterIndex = CharacterManager.characters.findIndex(c => c.id === CharacterManager.getSelected().id); // For character selection screen
 
-// Angry Bird
-let angryBird = null;
-const ANGRY_BIRD_SPEED = 2.5;
-const ANGRY_BIRD_SPAWN_CHANCE = 0.003; // Chance per frame to spawn
+// Angry Birds (now multiple)
+let angryBirds = [];
+const BASE_BIRD_SPEED = 2.5;
+const BASE_BIRD_SPAWN_INTERVAL = 120; // Frames between spawns
+let birdSpawnInterval = BASE_BIRD_SPAWN_INTERVAL;
+let birdSpawnCounter = 0;
 
 function createAngryBird() {
     const y = Math.random() * (canvas.height - 100) + 50;
@@ -626,101 +628,102 @@ function createAngryBird() {
         y: y,
         width: 50,
         height: 50,
-        speed: ANGRY_BIRD_SPEED,
+        speed: BASE_BIRD_SPEED * (1 + LevelManager.currentLevel * 0.2),
         active: true
     };
 }
 
-function updateAngryBird() {
+function updateAngryBirds() {
     if (gameState !== 'playing') return;
     
-    // Spawn angry bird randomly
-    if (!angryBird && Math.random() < ANGRY_BIRD_SPAWN_CHANCE) {
-        angryBird = createAngryBird();
+    // Spawn birds at intervals (more frequent at higher levels)
+    birdSpawnCounter++;
+    birdSpawnInterval = BASE_BIRD_SPAWN_INTERVAL / (1 + LevelManager.currentLevel * 0.3);
+    
+    if (birdSpawnCounter >= birdSpawnInterval) {
+        angryBirds.push(createAngryBird());
+        birdSpawnCounter = 0;
     }
     
-    // Update existing angry bird
-    if (angryBird) {
-        angryBird.x -= angryBird.speed;
+    // Update all birds
+    for (let i = angryBirds.length - 1; i >= 0; i--) {
+        const bird = angryBirds[i];
+        bird.x -= bird.speed;
         
-        // Remove if off screen
-        if (angryBird.x + angryBird.width < 0) {
-            angryBird = null;
+        // Remove if off screen (left side)
+        if (bird.x + bird.width < 0) {
+            angryBirds.splice(i, 1);
         }
     }
 }
 
-function drawAngryBird() {
-    if (angryBird && angryBirdImage.complete) {
-        // Pulsing glow effect
-        const pulse = Math.sin(animationTime * 0.1) * 0.5 + 0.5;
-        ctx.shadowBlur = 20 + pulse * 10;
-        ctx.shadowColor = '#FF4444';
-        
-        // Slight bobbing animation
-        const bob = Math.sin(animationTime * 0.15) * 3;
-        
-        // Flip the bird horizontally to face left
-        ctx.save();
-        ctx.translate(angryBird.x + angryBird.width, angryBird.y + bob);
-        ctx.scale(-1, 1);
-        ctx.drawImage(angryBirdImage, 0, 0, angryBird.width, angryBird.height);
-        ctx.restore();
-        
-        ctx.shadowBlur = 0;
-    } else if (angryBird) {
-        // Fallback if image not loaded
-        ctx.fillStyle = '#FF0000';
-        ctx.fillRect(angryBird.x, angryBird.y, angryBird.width, angryBird.height);
+function drawAngryBirds() {
+    for (const bird of angryBirds) {
+        if (angryBirdImage.complete) {
+            // Pulsing glow effect
+            const pulse = Math.sin(animationTime * 0.1) * 0.5 + 0.5;
+            ctx.shadowBlur = 20 + pulse * 10;
+            ctx.shadowColor = '#FF4444';
+            
+            // Slight bobbing animation
+            const bob = Math.sin(animationTime * 0.15 + bird.x * 0.01) * 3;
+            
+            // Flip the bird horizontally to face left
+            ctx.save();
+            ctx.translate(bird.x + bird.width, bird.y + bob);
+            ctx.scale(-1, 1);
+            ctx.drawImage(angryBirdImage, 0, 0, bird.width, bird.height);
+            ctx.restore();
+            
+            ctx.shadowBlur = 0;
+        } else {
+            // Fallback if image not loaded
+            ctx.fillStyle = '#FF0000';
+            ctx.fillRect(bird.x, bird.y, bird.width, bird.height);
+        }
     }
 }
 
-function checkAngryBirdCollision() {
-    if (!angryBird || gameState !== 'playing') return;
+function checkAngryBirdCollisions() {
+    if (gameState !== 'playing') return;
     
-    // Check missile collision with bird first
-    if (MissileManager.checkCollision(angryBird)) {
-        // Award bonus points for missile hit
-        score += MissileManager.scoreBonus;
+    for (let i = angryBirds.length - 1; i >= 0; i--) {
+        const bird = angryBirds[i];
         
-        // Create explosion effect at bird position
-        particleSystem.createExplosion(angryBird.x + angryBird.width / 2, angryBird.y + angryBird.height / 2);
-        
-        // Check for new high score
-        if (ScoreManager.isNewHighScore(score, highScore) && !confettiTriggered) {
-            highScore = score;
-            ScoreManager.saveHighScore(highScore);
-            particleSystem.createConfetti();
-            confettiTriggered = true;
+        // Check missile collision with bird first
+        if (MissileManager.checkCollision(bird)) {
+            // Award points for missile hit (ONLY way to score now!)
+            score += MissileManager.scoreBonus;
+            
+            // Check for level progression
+            LevelManager.updateLevel(score);
+            
+            // Create explosion effect at bird position
+            particleSystem.createExplosion(bird.x + bird.width / 2, bird.y + bird.height / 2);
+            
+            // Check for new high score
+            if (ScoreManager.isNewHighScore(score, highScore) && !confettiTriggered) {
+                highScore = score;
+                ScoreManager.saveHighScore(highScore);
+                particleSystem.createConfetti();
+                confettiTriggered = true;
+            }
+            
+            // Remove the bird
+            angryBirds.splice(i, 1);
+            continue;
         }
         
-        // Remove the bird
-        angryBird = null;
-        return;
-    }
-    
-    // Check collision with Kiro
-    if (kiro.x + kiro.width > angryBird.x && 
-        kiro.x < angryBird.x + angryBird.width &&
-        kiro.y + kiro.height > angryBird.y && 
-        kiro.y < angryBird.y + angryBird.height) {
-        
-        // Award bonus points!
-        score += 5;
-        
-        // Create sparkle effect at bird position
-        particleSystem.createSparkles(angryBird.x + angryBird.width / 2, angryBird.y + angryBird.height / 2);
-        
-        // Check for new high score
-        if (ScoreManager.isNewHighScore(score, highScore) && !confettiTriggered) {
-            highScore = score;
-            ScoreManager.saveHighScore(highScore);
-            particleSystem.createConfetti();
-            confettiTriggered = true;
+        // Check collision with player - NOW CAUSES GAME OVER!
+        if (kiro.x + kiro.width > bird.x && 
+            kiro.x < bird.x + bird.width &&
+            kiro.y + kiro.height > bird.y && 
+            kiro.y < bird.y + bird.height) {
+            
+            // Game over on bird collision!
+            gameOver();
+            return;
         }
-        
-        // Remove the bird
-        angryBird = null;
     }
 }
 
@@ -924,9 +927,9 @@ function resetGame() {
     gameState = 'playing';
     score = 0;
     frameCount = 0;
-    obstacles.length = 0;
     confettiTriggered = false;
-    angryBird = null;
+    angryBirds = [];
+    birdSpawnCounter = 0;
     kiro.reset();
     MissileManager.reset();
     LevelManager.reset();
@@ -1179,11 +1182,9 @@ function gameLoop() {
     if (gameState === 'playing') {
         frameCount++;
         kiro.update();
-        updateObstacles();
-        updateAngryBird();
+        updateAngryBirds();
         MissileManager.update();
-        checkCollision();
-        checkAngryBirdCollision();
+        checkAngryBirdCollisions();
         
         // Generate trail particles every 3 frames with character color
         if (frameCount % 3 === 0) {
@@ -1195,8 +1196,7 @@ function gameLoop() {
     }
     
     // Draw game elements
-    drawObstacles();
-    drawAngryBird();
+    drawAngryBirds();
     MissileManager.draw(ctx);
     kiro.draw();
     particleSystem.draw(ctx);
