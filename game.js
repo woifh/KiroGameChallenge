@@ -4,10 +4,14 @@ const ctx = canvas.getContext('2d');
 
 const GRAVITY = 0.2;
 const JUMP_POWER = -5.0;
-const OBSTACLE_SPEED = 0.9;
-const OBSTACLE_SPAWN_INTERVAL = 250;
+const BASE_OBSTACLE_SPEED = 0.9;
+const BASE_OBSTACLE_SPAWN_INTERVAL = 250;
 const OBSTACLE_GAP = 250;
 const OBSTACLE_WIDTH = 50;
+
+// Dynamic game variables (affected by level)
+let OBSTACLE_SPEED = BASE_OBSTACLE_SPEED;
+let OBSTACLE_SPAWN_INTERVAL = BASE_OBSTACLE_SPAWN_INTERVAL;
 
 // Load Kiro logo
 const kiroImage = new Image();
@@ -207,6 +211,122 @@ const MissileManager = {
         this.missiles = [];
         this.cooldown = 0;
         this.lastFrameTime = Date.now();
+    }
+};
+
+// Level Manager
+const LevelManager = {
+    currentLevel: 1,
+    levelTransitionShown: false,
+    transitionStartTime: 0,
+    transitionDuration: 2000, // 2 seconds
+    levels: [
+        {
+            number: 1,
+            scoreThreshold: 0,
+            obstacleSpeedMultiplier: 1.0,
+            spawnIntervalMultiplier: 1.0,
+            theme: { bg: 'dark', hue: 270, accent: '#790ECB' }
+        },
+        {
+            number: 2,
+            scoreThreshold: 10,
+            obstacleSpeedMultiplier: 1.2,
+            spawnIntervalMultiplier: 0.8,
+            theme: { bg: 'blue', hue: 210, accent: '#4444FF' }
+        },
+        {
+            number: 3,
+            scoreThreshold: 25,
+            obstacleSpeedMultiplier: 1.4,
+            spawnIntervalMultiplier: 0.7,
+            theme: { bg: 'red', hue: 0, accent: '#FF4444' }
+        }
+    ],
+    
+    updateLevel(currentScore) {
+        // Check if we should level up
+        for (let i = this.levels.length - 1; i >= 0; i--) {
+            const level = this.levels[i];
+            if (currentScore >= level.scoreThreshold && this.currentLevel < level.number) {
+                this.currentLevel = level.number;
+                this.showLevelTransition(level.number);
+                this.applyLevelSettings();
+                return true;
+            }
+        }
+        return false;
+    },
+    
+    getCurrentLevel() {
+        return this.levels.find(l => l.number === this.currentLevel) || this.levels[0];
+    },
+    
+    applyLevelSettings() {
+        const level = this.getCurrentLevel();
+        OBSTACLE_SPEED = BASE_OBSTACLE_SPEED * level.obstacleSpeedMultiplier;
+        OBSTACLE_SPAWN_INTERVAL = Math.floor(BASE_OBSTACLE_SPAWN_INTERVAL * level.spawnIntervalMultiplier);
+    },
+    
+    showLevelTransition(levelNumber) {
+        this.levelTransitionShown = true;
+        this.transitionStartTime = Date.now();
+        
+        // Create confetti for level up
+        particleSystem.createConfetti();
+    },
+    
+    isTransitionActive() {
+        if (!this.levelTransitionShown) return false;
+        const elapsed = Date.now() - this.transitionStartTime;
+        if (elapsed > this.transitionDuration) {
+            this.levelTransitionShown = false;
+            return false;
+        }
+        return true;
+    },
+    
+    drawLevelTransition(ctx) {
+        if (!this.isTransitionActive()) return;
+        
+        const elapsed = Date.now() - this.transitionStartTime;
+        const progress = elapsed / this.transitionDuration;
+        const opacity = progress < 0.5 ? progress * 2 : (1 - progress) * 2;
+        
+        ctx.fillStyle = `rgba(0, 0, 0, ${opacity * 0.7})`;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        const level = this.getCurrentLevel();
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = level.theme.accent;
+        ctx.fillStyle = level.theme.accent;
+        ctx.font = 'bold 48px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.globalAlpha = opacity;
+        ctx.fillText(`LEVEL ${this.currentLevel}`, canvas.width / 2, canvas.height / 2 - 20);
+        
+        ctx.font = '24px sans-serif';
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillText('Difficulty Increased!', canvas.width / 2, canvas.height / 2 + 30);
+        ctx.globalAlpha = 1.0;
+        ctx.shadowBlur = 0;
+    },
+    
+    drawLevelIndicator(ctx) {
+        const level = this.getCurrentLevel();
+        ctx.shadowBlur = 5;
+        ctx.shadowColor = '#000000';
+        ctx.fillStyle = level.theme.accent;
+        ctx.font = 'bold 20px sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText(`Level ${this.currentLevel}`, canvas.width - 20, 30);
+        ctx.shadowBlur = 0;
+    },
+    
+    reset() {
+        this.currentLevel = 1;
+        this.levelTransitionShown = false;
+        this.applyLevelSettings();
     }
 };
 
@@ -655,6 +775,9 @@ function updateObstacles() {
             obstacles[i].passed = true;
             score++;
             
+            // Check for level progression
+            LevelManager.updateLevel(score);
+            
             // Create sparkle effect at gap center
             const gapCenterX = obstacles[i].x + obstacles[i].width / 2;
             const gapCenterY = obstacles[i].topHeight + OBSTACLE_GAP / 2;
@@ -745,6 +868,7 @@ function resetGame() {
     angryBird = null;
     kiro.reset();
     MissileManager.reset();
+    LevelManager.reset();
 }
 
 function drawCharacterSelection() {
@@ -910,9 +1034,13 @@ function drawScore() {
         ctx.fillText(`NEW HIGH SCORE! 🎉`, 20, 105);
     }
     
+    // Level indicator
+    LevelManager.drawLevelIndicator(ctx);
+    
     // Missile count display
     ctx.font = '18px sans-serif';
     ctx.fillStyle = '#FFAA00';
+    ctx.textAlign = 'left';
     ctx.fillText(`Missiles: ${MissileManager.getCount()}/${MissileManager.maxMissiles}`, 20, 135);
     
     // Cooldown indicator
@@ -947,12 +1075,16 @@ function drawScore() {
 }
 
 function drawBackground() {
-    // Animated gradient background
+    // Get current level theme
+    const level = LevelManager.getCurrentLevel();
+    const baseHue = level.theme.hue;
+    
+    // Animated gradient background with level theme
     const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-    const hue = (animationTime * 0.1) % 360;
-    gradient.addColorStop(0, `hsl(${hue}, 30%, 8%)`);
+    const hueShift = (animationTime * 0.1) % 30;
+    gradient.addColorStop(0, `hsl(${baseHue + hueShift}, 30%, 8%)`);
     gradient.addColorStop(0.5, '#0a0a0a');
-    gradient.addColorStop(1, `hsl(${(hue + 60) % 360}, 30%, 12%)`);
+    gradient.addColorStop(1, `hsl(${(baseHue + hueShift + 30) % 360}, 30%, 12%)`);
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     
@@ -1001,6 +1133,7 @@ function gameLoop() {
     
     if (gameState === 'playing') {
         drawScore();
+        LevelManager.drawLevelTransition(ctx);
     }
     
     // Draw overlays
