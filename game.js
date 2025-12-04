@@ -230,14 +230,14 @@ const LevelManager = {
         },
         {
             number: 2,
-            scoreThreshold: 10,
+            scoreThreshold: 5,
             obstacleSpeedMultiplier: 1.2,
             spawnIntervalMultiplier: 0.8,
             theme: { bg: 'blue', hue: 210, accent: '#4444FF' }
         },
         {
             number: 3,
-            scoreThreshold: 25,
+            scoreThreshold: 15,
             obstacleSpeedMultiplier: 1.4,
             spawnIntervalMultiplier: 0.7,
             theme: { bg: 'red', hue: 0, accent: '#FF4444' }
