@@ -99,33 +99,39 @@ class Missile {
         this.level = level;
         this.angleOffset = angleOffset;
         
-        // Level-based properties
-        if (level === 1) {
-            // Basic missile
-            this.width = 20;
-            this.height = 5;
-            this.velocityX = 8;
+        // Get weapon power scaling
+        const weaponPower = LevelManager.getWeaponPower();
+        const sizeMultiplier = weaponPower.size;
+        
+        // Determine weapon type based on level
+        const weaponType = level <= 10 ? 'basic' : (level <= 20 ? 'spread' : 'homing');
+        
+        // Base properties with scaling
+        if (weaponType === 'basic') {
+            this.width = 20 * sizeMultiplier;
+            this.height = 5 * sizeMultiplier;
+            this.velocityX = weaponPower.speed;
             this.velocityY = 0;
             this.color = '#FFAA00';
             this.type = 'basic';
-        } else if (level === 2) {
-            // Faster spread shot
-            this.width = 18;
-            this.height = 4;
-            this.velocityX = 12;
-            this.velocityY = angleOffset * 2; // Spread pattern
+        } else if (weaponType === 'spread') {
+            this.width = 18 * sizeMultiplier;
+            this.height = 4 * sizeMultiplier;
+            this.velocityX = weaponPower.speed * 1.2;
+            this.velocityY = angleOffset * 2.5;
             this.color = '#44AAFF';
             this.type = 'spread';
         } else {
-            // Homing missile
-            this.width = 25;
-            this.height = 6;
-            this.velocityX = 10;
+            this.width = 25 * sizeMultiplier;
+            this.height = 6 * sizeMultiplier;
+            this.velocityX = weaponPower.speed;
             this.velocityY = 0;
             this.color = '#FF44FF';
             this.type = 'homing';
-            this.homingStrength = 0.15;
+            this.homingStrength = 0.15 + (level - 20) * 0.01; // Stronger homing at higher levels
         }
+        
+        this.damage = weaponPower.damage;
     }
     
     update() {
@@ -184,9 +190,6 @@ const MissileManager = {
     missiles: [],
     cooldown: 0,
     maxMissiles: 5,
-    cooldownDuration: 500, // milliseconds
-    missileSpeed: 8,
-    scoreBonus: 10,
     lastFrameTime: Date.now(),
     
     fire(playerX, playerY) {
@@ -195,19 +198,25 @@ const MissileManager = {
         }
         
         const currentLevel = LevelManager.currentLevel;
+        const weaponPower = LevelManager.getWeaponPower();
         
-        if (currentLevel === 2) {
-            // Level 2: Spread shot - fire 3 missiles
-            this.missiles.push(new Missile(playerX, playerY, 2, 0));    // Center
-            this.missiles.push(new Missile(playerX, playerY, 2, -1));   // Up
-            this.missiles.push(new Missile(playerX, playerY, 2, 1));    // Down
+        // Spread shot for levels 11-20, then homing for 21+
+        if (currentLevel > 10 && currentLevel <= 20) {
+            // Spread shot - fire 3 missiles
+            this.missiles.push(new Missile(playerX, playerY, currentLevel, 0));
+            this.missiles.push(new Missile(playerX, playerY, currentLevel, -1));
+            this.missiles.push(new Missile(playerX, playerY, currentLevel, 1));
         } else {
-            // Level 1 or 3: Single missile (basic or homing)
+            // Single missile (basic or homing)
             this.missiles.push(new Missile(playerX, playerY, currentLevel));
         }
         
-        this.cooldown = this.cooldownDuration;
+        this.cooldown = weaponPower.cooldown;
         return true;
+    },
+    
+    getDamage() {
+        return LevelManager.getWeaponPower().damage;
     },
     
     update() {
@@ -281,52 +290,46 @@ const LevelManager = {
     levelTransitionShown: false,
     transitionStartTime: 0,
     transitionDuration: 2000, // 2 seconds
-    levels: [
-        {
-            number: 1,
-            scoreThreshold: 0,
-            obstacleSpeedMultiplier: 1.0,
-            spawnIntervalMultiplier: 1.0,
-            theme: { bg: 'dark', hue: 270, accent: '#790ECB' }
-        },
-        {
-            number: 2,
-            scoreThreshold: 5,
-            obstacleSpeedMultiplier: 1.2,
-            spawnIntervalMultiplier: 0.8,
-            theme: { bg: 'blue', hue: 210, accent: '#4444FF' }
-        },
-        {
-            number: 3,
-            scoreThreshold: 15,
-            obstacleSpeedMultiplier: 1.4,
-            spawnIntervalMultiplier: 0.7,
-            theme: { bg: 'red', hue: 0, accent: '#FF4444' }
-        }
-    ],
+    pointsPerLevel: 10, // Level up every 10 points
     
     updateLevel(currentScore) {
-        // Check if we should level up
-        for (let i = this.levels.length - 1; i >= 0; i--) {
-            const level = this.levels[i];
-            if (currentScore >= level.scoreThreshold && this.currentLevel < level.number) {
-                this.currentLevel = level.number;
-                this.showLevelTransition(level.number);
-                this.applyLevelSettings();
-                return true;
-            }
+        // Infinite scaling - level up every 10 points
+        const newLevel = Math.floor(currentScore / this.pointsPerLevel) + 1;
+        
+        if (newLevel > this.currentLevel) {
+            this.currentLevel = newLevel;
+            this.showLevelTransition(newLevel);
+            return true;
         }
         return false;
     },
     
     getCurrentLevel() {
-        return this.levels.find(l => l.number === this.currentLevel) || this.levels[0];
+        // Dynamic level properties based on current level
+        const level = this.currentLevel;
+        const hueRotation = (level * 60) % 360; // Cycle through colors
+        
+        return {
+            number: level,
+            scoreThreshold: (level - 1) * this.pointsPerLevel,
+            birdSpeedMultiplier: 1.0 + (level - 1) * 0.15, // Birds get 15% faster each level
+            spawnIntervalMultiplier: Math.max(0.3, 1.0 - (level - 1) * 0.08), // Spawn faster, min 30%
+            theme: { 
+                bg: 'dynamic', 
+                hue: hueRotation, 
+                accent: `hsl(${hueRotation}, 70%, 50%)` 
+            }
+        };
     },
     
-    applyLevelSettings() {
-        const level = this.getCurrentLevel();
-        OBSTACLE_SPEED = BASE_OBSTACLE_SPEED * level.obstacleSpeedMultiplier;
-        OBSTACLE_SPAWN_INTERVAL = Math.floor(BASE_OBSTACLE_SPAWN_INTERVAL * level.spawnIntervalMultiplier);
+    getWeaponPower() {
+        // Weapons get more powerful with each level
+        return {
+            damage: 10 + (this.currentLevel - 1) * 2, // +2 damage per level
+            speed: 8 + Math.min(this.currentLevel - 1, 10) * 0.5, // Speed caps at level 20
+            size: 1.0 + Math.min(this.currentLevel - 1, 15) * 0.05, // Size increases, caps at level 30
+            cooldown: Math.max(200, 500 - (this.currentLevel - 1) * 15) // Faster firing, min 200ms
+        };
     },
     
     showLevelTransition(levelNumber) {
@@ -622,13 +625,14 @@ let birdSpawnInterval = BASE_BIRD_SPAWN_INTERVAL;
 let birdSpawnCounter = 0;
 
 function createAngryBird() {
+    const levelData = LevelManager.getCurrentLevel();
     const y = Math.random() * (canvas.height - 100) + 50;
     return {
         x: canvas.width,
         y: y,
         width: 50,
         height: 50,
-        speed: BASE_BIRD_SPEED * (1 + LevelManager.currentLevel * 0.2),
+        speed: BASE_BIRD_SPEED * levelData.birdSpeedMultiplier,
         active: true
     };
 }
@@ -637,8 +641,9 @@ function updateAngryBirds() {
     if (gameState !== 'playing') return;
     
     // Spawn birds at intervals (more frequent at higher levels)
+    const levelData = LevelManager.getCurrentLevel();
     birdSpawnCounter++;
-    birdSpawnInterval = BASE_BIRD_SPAWN_INTERVAL / (1 + LevelManager.currentLevel * 0.3);
+    birdSpawnInterval = BASE_BIRD_SPAWN_INTERVAL * levelData.spawnIntervalMultiplier;
     
     if (birdSpawnCounter >= birdSpawnInterval) {
         angryBirds.push(createAngryBird());
@@ -693,7 +698,7 @@ function checkAngryBirdCollisions() {
         // Check missile collision with bird first
         if (MissileManager.checkCollision(bird)) {
             // Award points for missile hit (ONLY way to score now!)
-            score += MissileManager.scoreBonus;
+            score += MissileManager.getDamage();
             
             // Check for level progression
             LevelManager.updateLevel(score);
@@ -1101,28 +1106,31 @@ function drawScore() {
     // Level indicator
     LevelManager.drawLevelIndicator(ctx);
     
-    // Weapon type and missile count display
-    const weaponNames = {
-        1: '🔸 Basic Missiles',
-        2: '⚡ Spread Shot',
-        3: '🎯 Homing Missiles'
-    };
+    // Weapon type and power display
+    const level = LevelManager.currentLevel;
+    const weaponPower = LevelManager.getWeaponPower();
+    let weaponName = level <= 10 ? '🔸 Basic' : (level <= 20 ? '⚡ Spread' : '🎯 Homing');
+    
     ctx.font = 'bold 18px sans-serif';
     ctx.fillStyle = '#FFAA00';
     ctx.textAlign = 'left';
-    ctx.fillText(weaponNames[LevelManager.currentLevel], 20, 135);
+    ctx.fillText(`${weaponName} Lv.${level}`, 20, 135);
+    
+    ctx.font = '14px sans-serif';
+    ctx.fillStyle = '#CCCCCC';
+    ctx.fillText(`DMG: ${weaponPower.damage} | SPD: ${weaponPower.speed.toFixed(1)}`, 20, 153);
     
     ctx.font = '16px sans-serif';
-    ctx.fillStyle = '#CCCCCC';
-    ctx.fillText(`Ammo: ${MissileManager.getCount()}/${MissileManager.maxMissiles}`, 20, 155);
+    ctx.fillText(`Ammo: ${MissileManager.getCount()}/${MissileManager.maxMissiles}`, 20, 171);
     
     // Cooldown indicator
     if (MissileManager.cooldown > 0) {
-        const cooldownPercent = MissileManager.cooldown / MissileManager.cooldownDuration;
+        const weaponPower = LevelManager.getWeaponPower();
+        const cooldownPercent = MissileManager.cooldown / weaponPower.cooldown;
         const barWidth = 100;
         const barHeight = 8;
         const barX = 20;
-        const barY = 165;
+        const barY = 181;
         
         // Background bar
         ctx.fillStyle = '#333333';
@@ -1140,8 +1148,8 @@ function drawScore() {
         // Ready indicator
         const pulse = Math.sin(animationTime * 0.3) * 0.3 + 0.7;
         ctx.fillStyle = `rgba(68, 255, 68, ${pulse})`;
-        ctx.font = 'bold 16px sans-serif';
-        ctx.fillText('READY TO FIRE!', 20, 175);
+        ctx.font = 'bold 14px sans-serif';
+        ctx.fillText('READY!', 20, 193);
     }
     
     ctx.shadowBlur = 0;
