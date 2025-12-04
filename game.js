@@ -87,6 +87,129 @@ const CharacterManager = {
 // Initialize character manager
 CharacterManager.init();
 
+// Missile System
+class Missile {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.width = 20;
+        this.height = 5;
+        this.velocityX = 8;
+        this.color = '#FFAA00';
+    }
+    
+    update() {
+        this.x += this.velocityX;
+    }
+    
+    draw(ctx) {
+        // Add glow effect
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = this.color;
+        ctx.fillStyle = this.color;
+        ctx.fillRect(this.x, this.y - this.height / 2, this.width, this.height);
+        ctx.shadowBlur = 0;
+    }
+    
+    isOffScreen(canvasWidth) {
+        return this.x > canvasWidth;
+    }
+    
+    getBounds() {
+        return {
+            x: this.x,
+            y: this.y - this.height / 2,
+            width: this.width,
+            height: this.height
+        };
+    }
+}
+
+const MissileManager = {
+    missiles: [],
+    cooldown: 0,
+    maxMissiles: 5,
+    cooldownDuration: 500, // milliseconds
+    missileSpeed: 8,
+    scoreBonus: 10,
+    lastFrameTime: Date.now(),
+    
+    fire(playerX, playerY) {
+        if (!this.canFire()) {
+            return false;
+        }
+        
+        const missile = new Missile(playerX, playerY);
+        this.missiles.push(missile);
+        this.cooldown = this.cooldownDuration;
+        return true;
+    },
+    
+    update() {
+        // Update cooldown
+        const currentTime = Date.now();
+        const deltaTime = currentTime - this.lastFrameTime;
+        this.lastFrameTime = currentTime;
+        
+        if (this.cooldown > 0) {
+            this.cooldown = Math.max(0, this.cooldown - deltaTime);
+        }
+        
+        // Update all missiles
+        for (const missile of this.missiles) {
+            missile.update();
+        }
+        
+        // Cleanup off-screen missiles
+        this.cleanup(canvas.width);
+    },
+    
+    draw(ctx) {
+        for (const missile of this.missiles) {
+            missile.draw(ctx);
+        }
+    },
+    
+    checkCollision(bird) {
+        if (!bird) return false;
+        
+        for (let i = this.missiles.length - 1; i >= 0; i--) {
+            const missile = this.missiles[i];
+            const missileBounds = missile.getBounds();
+            
+            // Check collision with bird
+            if (missileBounds.x + missileBounds.width > bird.x &&
+                missileBounds.x < bird.x + bird.width &&
+                missileBounds.y + missileBounds.height > bird.y &&
+                missileBounds.y < bird.y + bird.height) {
+                
+                // Remove missile
+                this.missiles.splice(i, 1);
+                return true;
+            }
+        }
+        return false;
+    },
+    
+    cleanup(canvasWidth) {
+        this.missiles = this.missiles.filter(missile => !missile.isOffScreen(canvasWidth));
+    },
+    
+    canFire() {
+        return this.cooldown <= 0 && this.missiles.length < this.maxMissiles;
+    },
+    
+    getCount() {
+        return this.missiles.length;
+    },
+    
+    reset() {
+        this.missiles = [];
+        this.cooldown = 0;
+        this.lastFrameTime = Date.now();
+    }
+};
+
 // Animation variables
 let animationTime = 0;
 
@@ -374,6 +497,27 @@ function drawAngryBird() {
 function checkAngryBirdCollision() {
     if (!angryBird || gameState !== 'playing') return;
     
+    // Check missile collision with bird first
+    if (MissileManager.checkCollision(angryBird)) {
+        // Award bonus points for missile hit
+        score += MissileManager.scoreBonus;
+        
+        // Create explosion effect at bird position
+        particleSystem.createExplosion(angryBird.x + angryBird.width / 2, angryBird.y + angryBird.height / 2);
+        
+        // Check for new high score
+        if (ScoreManager.isNewHighScore(score, highScore) && !confettiTriggered) {
+            highScore = score;
+            ScoreManager.saveHighScore(highScore);
+            particleSystem.createConfetti();
+            confettiTriggered = true;
+        }
+        
+        // Remove the bird
+        angryBird = null;
+        return;
+    }
+    
     // Check collision with Kiro
     if (kiro.x + kiro.width > angryBird.x && 
         kiro.x < angryBird.x + angryBird.width &&
@@ -600,6 +744,7 @@ function resetGame() {
     confettiTriggered = false;
     angryBird = null;
     kiro.reset();
+    MissileManager.reset();
 }
 
 function drawCharacterSelection() {
@@ -765,6 +910,39 @@ function drawScore() {
         ctx.fillText(`NEW HIGH SCORE! 🎉`, 20, 105);
     }
     
+    // Missile count display
+    ctx.font = '18px sans-serif';
+    ctx.fillStyle = '#FFAA00';
+    ctx.fillText(`Missiles: ${MissileManager.getCount()}/${MissileManager.maxMissiles}`, 20, 135);
+    
+    // Cooldown indicator
+    if (MissileManager.cooldown > 0) {
+        const cooldownPercent = MissileManager.cooldown / MissileManager.cooldownDuration;
+        const barWidth = 100;
+        const barHeight = 8;
+        const barX = 20;
+        const barY = 145;
+        
+        // Background bar
+        ctx.fillStyle = '#333333';
+        ctx.fillRect(barX, barY, barWidth, barHeight);
+        
+        // Cooldown bar
+        ctx.fillStyle = '#FF4444';
+        ctx.fillRect(barX, barY, barWidth * cooldownPercent, barHeight);
+        
+        // Border
+        ctx.strokeStyle = '#FFAA00';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(barX, barY, barWidth, barHeight);
+    } else {
+        // Ready indicator
+        const pulse = Math.sin(animationTime * 0.3) * 0.3 + 0.7;
+        ctx.fillStyle = `rgba(68, 255, 68, ${pulse})`;
+        ctx.font = 'bold 16px sans-serif';
+        ctx.fillText('READY TO FIRE!', 20, 155);
+    }
+    
     ctx.shadowBlur = 0;
 }
 
@@ -801,6 +979,7 @@ function gameLoop() {
         kiro.update();
         updateObstacles();
         updateAngryBird();
+        MissileManager.update();
         checkCollision();
         checkAngryBirdCollision();
         
@@ -816,6 +995,7 @@ function gameLoop() {
     // Draw game elements
     drawObstacles();
     drawAngryBird();
+    MissileManager.draw(ctx);
     kiro.draw();
     particleSystem.draw(ctx);
     
@@ -865,11 +1045,14 @@ document.addEventListener('keydown', (e) => {
         }
     }
     
-    // Space to start/restart
+    // Space to start/restart or fire missile
     if (e.code === 'Space') {
         e.preventDefault();
         if (gameState === 'start' || gameState === 'gameOver') {
             resetGame();
+        } else if (gameState === 'playing') {
+            // Fire missile from player position
+            MissileManager.fire(kiro.x + kiro.width, kiro.y + kiro.height / 2);
         }
     }
 });
