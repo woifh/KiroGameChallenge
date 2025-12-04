@@ -93,30 +93,81 @@ CharacterManager.init();
 
 // Missile System
 class Missile {
-    constructor(x, y) {
+    constructor(x, y, level = 1, angleOffset = 0) {
         this.x = x;
         this.y = y;
-        this.width = 20;
-        this.height = 5;
-        this.velocityX = 8;
-        this.color = '#FFAA00';
+        this.level = level;
+        this.angleOffset = angleOffset;
+        
+        // Level-based properties
+        if (level === 1) {
+            // Basic missile
+            this.width = 20;
+            this.height = 5;
+            this.velocityX = 8;
+            this.velocityY = 0;
+            this.color = '#FFAA00';
+            this.type = 'basic';
+        } else if (level === 2) {
+            // Faster spread shot
+            this.width = 18;
+            this.height = 4;
+            this.velocityX = 12;
+            this.velocityY = angleOffset * 2; // Spread pattern
+            this.color = '#44AAFF';
+            this.type = 'spread';
+        } else {
+            // Homing missile
+            this.width = 25;
+            this.height = 6;
+            this.velocityX = 10;
+            this.velocityY = 0;
+            this.color = '#FF44FF';
+            this.type = 'homing';
+            this.homingStrength = 0.15;
+        }
     }
     
     update() {
+        // Homing behavior for level 3
+        if (this.type === 'homing' && angryBird) {
+            const dx = angryBird.x - this.x;
+            const dy = angryBird.y - this.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            if (distance > 0) {
+                this.velocityY += (dy / distance) * this.homingStrength;
+                // Limit vertical velocity
+                this.velocityY = Math.max(-3, Math.min(3, this.velocityY));
+            }
+        }
+        
         this.x += this.velocityX;
+        this.y += this.velocityY;
     }
     
     draw(ctx) {
         // Add glow effect
-        ctx.shadowBlur = 10;
+        ctx.shadowBlur = this.type === 'homing' ? 15 : 10;
         ctx.shadowColor = this.color;
         ctx.fillStyle = this.color;
-        ctx.fillRect(this.x, this.y - this.height / 2, this.width, this.height);
+        
+        if (this.type === 'homing') {
+            // Draw larger homing missile with trail
+            ctx.fillRect(this.x, this.y - this.height / 2, this.width, this.height);
+            // Add small trail
+            ctx.globalAlpha = 0.5;
+            ctx.fillRect(this.x - 10, this.y - this.height / 2 + 1, 10, this.height - 2);
+            ctx.globalAlpha = 1.0;
+        } else {
+            ctx.fillRect(this.x, this.y - this.height / 2, this.width, this.height);
+        }
+        
         ctx.shadowBlur = 0;
     }
     
     isOffScreen(canvasWidth) {
-        return this.x > canvasWidth;
+        return this.x > canvasWidth || this.y < -50 || this.y > canvas.height + 50;
     }
     
     getBounds() {
@@ -143,8 +194,18 @@ const MissileManager = {
             return false;
         }
         
-        const missile = new Missile(playerX, playerY);
-        this.missiles.push(missile);
+        const currentLevel = LevelManager.currentLevel;
+        
+        if (currentLevel === 2) {
+            // Level 2: Spread shot - fire 3 missiles
+            this.missiles.push(new Missile(playerX, playerY, 2, 0));    // Center
+            this.missiles.push(new Missile(playerX, playerY, 2, -1));   // Up
+            this.missiles.push(new Missile(playerX, playerY, 2, 1));    // Down
+        } else {
+            // Level 1 or 3: Single missile (basic or homing)
+            this.missiles.push(new Missile(playerX, playerY, currentLevel));
+        }
+        
         this.cooldown = this.cooldownDuration;
         return true;
     },
@@ -1037,11 +1098,20 @@ function drawScore() {
     // Level indicator
     LevelManager.drawLevelIndicator(ctx);
     
-    // Missile count display
-    ctx.font = '18px sans-serif';
+    // Weapon type and missile count display
+    const weaponNames = {
+        1: '🔸 Basic Missiles',
+        2: '⚡ Spread Shot',
+        3: '🎯 Homing Missiles'
+    };
+    ctx.font = 'bold 18px sans-serif';
     ctx.fillStyle = '#FFAA00';
     ctx.textAlign = 'left';
-    ctx.fillText(`Missiles: ${MissileManager.getCount()}/${MissileManager.maxMissiles}`, 20, 135);
+    ctx.fillText(weaponNames[LevelManager.currentLevel], 20, 135);
+    
+    ctx.font = '16px sans-serif';
+    ctx.fillStyle = '#CCCCCC';
+    ctx.fillText(`Ammo: ${MissileManager.getCount()}/${MissileManager.maxMissiles}`, 20, 155);
     
     // Cooldown indicator
     if (MissileManager.cooldown > 0) {
@@ -1049,7 +1119,7 @@ function drawScore() {
         const barWidth = 100;
         const barHeight = 8;
         const barX = 20;
-        const barY = 145;
+        const barY = 165;
         
         // Background bar
         ctx.fillStyle = '#333333';
@@ -1068,7 +1138,7 @@ function drawScore() {
         const pulse = Math.sin(animationTime * 0.3) * 0.3 + 0.7;
         ctx.fillStyle = `rgba(68, 255, 68, ${pulse})`;
         ctx.font = 'bold 16px sans-serif';
-        ctx.fillText('READY TO FIRE!', 20, 155);
+        ctx.fillText('READY TO FIRE!', 20, 175);
     }
     
     ctx.shadowBlur = 0;
